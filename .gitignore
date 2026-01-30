@@ -1,0 +1,17 @@
+.venv/
+
+temp/
+data/
+
+.env
+
+*.log
+*.tmp
+*.csv
+
+.claude/
+.clinerules/
+.clineignore
+.vscode/
+
+docs/

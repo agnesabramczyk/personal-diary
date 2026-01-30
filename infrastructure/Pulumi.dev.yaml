@@ -1,0 +1,4 @@
+encryptionsalt: v1:gztcr6+Vzy4=:v1:0ryt91xWQ2fsG2EF:MzHsncjbInmDtXm3ew2YZBcNeGio8g==
+config:
+  gcp:project: personal-diary-dev
+  gcp:region: australia-southeast1

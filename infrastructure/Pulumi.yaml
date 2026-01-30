@@ -1,0 +1,11 @@
+name: personal-diary-api
+description: Personal Diary REST API Infrastructure
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: venv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: gcp-python

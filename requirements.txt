@@ -1,0 +1,25 @@
+# FastAPI Web Framework
+fastapi==0.128.0
+uvicorn[standard]==0.40.0
+
+# Google Cloud Platform
+google-cloud-firestore==2.23.0
+google-cloud-storage==3.8.0
+
+# Image Processing
+pillow==12.1.0
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Data Validation
+pydantic==2.12.5
+pydantic-settings==2.7.0
+
+# Configuration Management
+python-dotenv==1.2.1
+
+# Development Tools
+ruff==0.14.14
+pytest==9.0.2
+pytest-asyncio==1.3.0

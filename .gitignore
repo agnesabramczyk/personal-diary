@@ -4,6 +4,7 @@ temp/
 data/
 
 .env
+gcp-key.json
 
 *.log
 *.tmp

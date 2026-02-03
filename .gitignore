@@ -52,6 +52,7 @@ docs/
 .claude/
 .clinerules/
 .clineignore
+.mcp.json
 
 # Misc
 *.csv

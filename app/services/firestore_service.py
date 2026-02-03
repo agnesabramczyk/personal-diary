@@ -16,11 +16,17 @@ class FirestoreService:
     ENTRIES_COLLECTION = "entries"
     PHOTOS_COLLECTION = "photos"
     
-    def __init__(self, project_id: str, credentials_path: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: str,
+        database: str = "(default)",
+        credentials_path: Optional[str] = None
+    ):
         """Initialise Firestore service.
 
         Args:
             project_id: GCP project ID
+            database: Firestore database name (defaults to "(default)")
             credentials_path: Path to service account credentials JSON file.
         """
         # When credentials_path is None, Client() uses default credentials
@@ -30,9 +36,13 @@ class FirestoreService:
             credentials = service_account.Credentials.from_service_account_file(
                 credentials_path
             )
-            self.client = firestore.Client(project=project_id, credentials=credentials)
+            self.client = firestore.Client(
+                project=project_id,
+                database=database,
+                credentials=credentials
+            )
         else:
-            self.client = firestore.Client(project=project_id)
+            self.client = firestore.Client(project=project_id, database=database)
         self._credentials_path = credentials_path
     
     def create_entry(

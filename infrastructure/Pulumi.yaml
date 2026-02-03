@@ -3,8 +3,7 @@ description: Personal Diary REST API Infrastructure
 runtime:
   name: python
   options:
-    toolchain: pip
-    virtualenv: venv
+    virtualenv: .venv
 config:
   pulumi:tags:
     value:

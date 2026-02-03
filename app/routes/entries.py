@@ -66,6 +66,7 @@ async def get_firestore_service() -> FirestoreService:
     """
     return FirestoreService(
         project_id=settings.gcp_project_id,
+        database=settings.firestore_database,
         credentials_path=settings.google_application_credentials,
     )
 

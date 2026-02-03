@@ -20,12 +20,26 @@ from app.config import settings
 from app.routes import entries_router, photos_router
 
 
+# Logging filter to add default correlation_id for external libraries
+class CorrelationIdFilter(logging.Filter):
+    """Add a default correlation_id to log records that don't have one."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, 'correlation_id'):
+            record.correlation_id = 'system'
+        return True
+
+
 # Configure structured logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
     format='{"timestamp": "%(asctime)s", "level": "%(levelname)s", "correlation_id": "%(correlation_id)s", "message": "%(message)s", "module": "%(module)s"}',
     datefmt="%Y-%m-%dT%H:%M:%S%z"
 )
+
+# Add the correlation ID filter to the root logger
+logging.getLogger().addFilter(CorrelationIdFilter())
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,13 +75,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         firestore_service = FirestoreService(
             project_id=settings.gcp_project_id,
+            database=settings.firestore_database,
             credentials_path=settings.google_application_credentials,
         )
         # Test connection by accessing collections (doesn't retrieve data)
         list(firestore_service.client.collections())
 
         creds_info = "with service account key" if settings.google_application_credentials else "with Workload Identity"
-        logger.info(f"Firestore connected to project: {settings.gcp_project_id} {creds_info}")
+        logger.info(f"Firestore connected to project: {settings.gcp_project_id}, database: {settings.firestore_database} {creds_info}")
     except Exception as e:
         logger.warning(f"Failed to initialise Firestore: {e}")
         logger.warning("Application will continue but Firestore operations may fail")

@@ -2,3 +2,9 @@ encryptionsalt: v1:gztcr6+Vzy4=:v1:0ryt91xWQ2fsG2EF:MzHsncjbInmDtXm3ew2YZBcNeGio
 config:
   gcp:project: personal-diary-dev
   gcp:region: australia-southeast1
+  environment: development
+  log_level: DEBUG
+  cors_origins: "http://localhost:3000"
+  rate_limit_per_minute: "100"
+  # Default image tag for bootstrap; make deploy overrides with git commit hash
+  image_tag: latest

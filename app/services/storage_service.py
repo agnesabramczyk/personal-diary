@@ -46,6 +46,7 @@ class StorageService:
         self.bucket = self.client.bucket(settings.storage_bucket)
         self.firestore = FirestoreService(
             project_id=settings.gcp_project_id,
+            database=settings.firestore_database,
             credentials_path=settings.google_application_credentials,
         )
 

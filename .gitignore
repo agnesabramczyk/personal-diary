@@ -18,7 +18,6 @@ env/
 
 # Environment & Credentials
 .env
-.env.local
 gcp-key.json
 *.json.key
 *-key.json

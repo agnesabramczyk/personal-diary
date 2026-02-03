@@ -96,15 +96,24 @@ Deploy GCP infrastructure using Pulumi:
 ```bash
 cd infrastructure
 
-# Install Pulumi dependencies
-pip install -r requirements.txt
+# Install Pulumi dependencies (creates venv and installs locked dependencies)
+uv sync
+source .venv/bin/activate
+
+# Log in to local Pulumi backend
+pulumi login file://~
 
 # Configure Pulumi stack
 pulumi stack init dev
 
-# Set GCP project
+# Set required configuration
 pulumi config set gcp:project $PROJECT_ID
 pulumi config set gcp:region australia-southeast1
+pulumi config set environment development
+pulumi config set log_level DEBUG
+pulumi config set cors_origins "http://localhost:3000"
+pulumi config set rate_limit_per_minute "100"
+pulumi config set image_tag latest
 
 # Preview changes
 pulumi preview
@@ -118,12 +127,15 @@ pulumi stack output
 
 The Pulumi program creates:
 - Cloud Firestore database (Firestore mode)
+- Firestore composite indexes for efficient queries (defined in `firestore.indexes.json`)
 - Cloud Storage bucket (private with lifecycle rules)
 - Artifact Registry repository for Docker images
 - Secret Manager for API keys
 - Cloud Run service
 - Service account with minimal permissions
 - IAM bindings and service account key (for local development)
+
+**Note**: Firestore index creation can take 10-15 minutes on first deployment.
 
 ### Infrastructure Management
 
@@ -151,24 +163,23 @@ pulumi stack output bucketName > .env
 
 2. **Create Virtual Environment and Install Dependencies**
    ```bash
-   # Create virtual environment with uv (faster than venv)
-   uv venv
+   # Using uv (recommended - creates venv and installs locked dependencies)
+   uv sync
 
    # Activate virtual environment
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
 
-   # Install dependencies (much faster than pip)
-   uv pip install -r requirements.txt
-
-   # Or install with dev dependencies
-   uv pip install -e ".[dev]"
+   **To include dev dependencies (for testing and linting):**
+   ```bash
+   uv sync --all-extras
    ```
 
    **Alternative (using pip):**
    ```bash
    python -m venv .venv
    source .venv/bin/activate
-   pip install -r requirements.txt
+   pip install -e ".[dev]"
    ```
 
 4. **Configure Environment**
@@ -184,6 +195,7 @@ pulumi stack output bucketName > .env
    GCP_PROJECT_ID=your-gcp-project-id
    GCP_REGION=australia-southeast1
    STORAGE_BUCKET=your-storage-bucket-name
+   FIRESTORE_DATABASE=personal-diary
 
    # API Keys (generate secure keys)
    # Note: For local development, use environment variables
@@ -238,12 +250,13 @@ docker run -d \
   --name personal-diary \
   -p 8080:8080 \
   --env-file .env \
-  -v ~/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro \
-  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json \
+  -v ~/.config/gcloud:/home/appuser/.config/gcloud:ro \
   personal-diary:latest
 ```
 
-Or use docker-compose (simpler):
+**Note**: When mounting ADC at the standard location (`~/.config/gcloud/`), Google Cloud libraries automatically discover and use the credentials without needing the `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
+
+Or use docker-compose (simpler and recommended):
 ```bash
 docker-compose up
 ```
@@ -319,6 +332,7 @@ curl -X POST http://localhost:8080/api/entries \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
+    "timestamp": "2026-02-02T09:30:00+10:00",
     "title": "Morning Reflection",
     "body": "Beautiful sunrise today. Feeling energised and ready for the day.",
     "tags": ["morning", "reflection"],
@@ -332,7 +346,8 @@ Response:
 ```json
 {
   "id": "abc123",
-  "timestamp": "2026-02-02T14:02:26+10:00",
+  "user_id": "your-api-key-here",
+  "timestamp": "2026-02-02T09:30:00+10:00",
   "title": "Morning Reflection",
   "body": "Beautiful sunrise today. Feeling energised and ready for the day.",
   "tags": ["morning", "reflection"],
@@ -341,9 +356,11 @@ Response:
   "weather": "Sunny, 24°C",
   "created_at": "2026-02-02T14:02:26+10:00",
   "updated_at": "2026-02-02T14:02:26+10:00",
-  "photos": []
+  "photo_count": 0
 }
 ```
+
+**Note**: The `timestamp` field is required and should be in AEST timezone (UTC+10:00).
 
 #### Get Entry by ID
 
@@ -352,18 +369,57 @@ curl http://localhost:8080/api/entries/abc123 \
   -H "X-API-Key: $API_KEY"
 ```
 
+Response:
+```json
+{
+  "id": "abc123",
+  "user_id": "your-api-key-here",
+  "timestamp": "2026-02-02T09:30:00+10:00",
+  "title": "Morning Reflection",
+  "body": "Beautiful sunrise today. Feeling energised and ready for the day.",
+  "tags": ["morning", "reflection"],
+  "mood": "happy",
+  "location": "Brisbane, QLD",
+  "weather": "Sunny, 24°C",
+  "created_at": "2026-02-02T14:02:26+10:00",
+  "updated_at": "2026-02-02T14:02:26+10:00",
+  "photo_count": 0
+}
+```
+
 #### Update Entry
+
+Partial updates are supported - only provide fields you want to change:
 
 ```bash
 curl -X PUT http://localhost:8080/api/entries/abc123 \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "title": "Morning Reflection (Updated)",
-    "body": "Beautiful sunrise today. Added some thoughts about the day ahead.",
-    "tags": ["morning", "reflection", "planning"]
+    "mood": "energised",
+    "weather": "Sunny, 26°C"
   }'
 ```
+
+Response:
+```json
+{
+  "id": "abc123",
+  "user_id": "your-api-key-here",
+  "timestamp": "2026-02-02T09:30:00+10:00",
+  "title": "Morning Reflection",
+  "body": "Beautiful sunrise today. Feeling energised and ready for the day.",
+  "tags": ["morning", "reflection"],
+  "mood": "energised",
+  "location": "Brisbane, QLD",
+  "weather": "Sunny, 26°C",
+  "created_at": "2026-02-02T14:02:26+10:00",
+  "updated_at": "2026-02-02T14:05:30+10:00",
+  "photo_count": 0
+}
+```
+
+Note the `updated_at` timestamp has changed.
 
 #### Delete Entry
 
@@ -372,19 +428,17 @@ curl -X DELETE http://localhost:8080/api/entries/abc123 \
   -H "X-API-Key: $API_KEY"
 ```
 
+Response: `204 No Content` (successful deletion)
+
 #### List Entries
 
 ```bash
 # Get all entries (paginated)
-curl "http://localhost:8080/api/entries?limit=20&offset=0" \
+curl "http://localhost:8080/api/entries?page=1&page_size=20" \
   -H "X-API-Key: $API_KEY"
 
-# Filter by tags
-curl "http://localhost:8080/api/entries?tags=morning&tags=reflection" \
-  -H "X-API-Key: $API_KEY"
-
-# Search by text
-curl "http://localhost:8080/api/entries?search=sunrise" \
+# Filter by tags (requires composite index in Firestore)
+curl "http://localhost:8080/api/entries?tags=beach&tags=summer" \
   -H "X-API-Key: $API_KEY"
 
 # Date range
@@ -392,11 +446,72 @@ curl "http://localhost:8080/api/entries?start_date=2026-01-01&end_date=2026-02-0
   -H "X-API-Key: $API_KEY"
 ```
 
+Response:
+```json
+{
+  "items": [
+    {
+      "id": "abc123",
+      "user_id": "your-api-key-here",
+      "timestamp": "2026-02-02T09:30:00+10:00",
+      "title": "Morning Reflection",
+      "body": "Beautiful sunrise today. Feeling energised and ready for the day.",
+      "tags": ["morning", "reflection"],
+      "mood": "happy",
+      "location": "Brisbane, QLD",
+      "weather": "Sunny, 24°C",
+      "created_at": "2026-02-02T14:02:26+10:00",
+      "updated_at": "2026-02-02T14:02:26+10:00",
+      "photo_count": 0
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 1,
+  "has_next": false,
+  "has_previous": false,
+  "next_cursor": null
+}
+```
+
+**Note on Tag Filtering**: Tag filtering requires a composite Firestore index with fields: `tags` (CONTAINS), `user_id` (ASCENDING), `timestamp` (DESCENDING). This index is defined in `infrastructure/firestore.indexes.json` and created automatically by Pulumi. Index creation takes 10-15 minutes on first deployment.
+
+#### Search Entries
+
+```bash
+# Search by text in title and body
+curl "http://localhost:8080/api/entries/search?q=beach" \
+  -H "X-API-Key: $API_KEY"
+```
+
+Response includes matching entries with pagination.
+
 #### Get Entries by Date
 
 ```bash
-curl http://localhost:8080/api/entries/date/2026-02-02 \
+curl http://localhost:8080/api/entries/by-date/2026-02-02 \
   -H "X-API-Key: $API_KEY"
+```
+
+Response:
+```json
+[
+  {
+    "id": "abc123",
+    "user_id": "your-api-key-here",
+    "timestamp": "2026-02-02T09:30:00+10:00",
+    "title": "Morning Reflection",
+    "body": "Beautiful sunrise today. Feeling energised and ready for the day.",
+    "tags": ["morning", "reflection"],
+    "mood": "happy",
+    "location": "Brisbane, QLD",
+    "weather": "Sunny, 24°C",
+    "created_at": "2026-02-02T14:02:26+10:00",
+    "updated_at": "2026-02-02T14:02:26+10:00",
+    "photo_count": 0
+  }
+]
 ```
 
 #### Upload Photo
@@ -592,7 +707,8 @@ personal-diary/
 ├── infrastructure/
 │   ├── __main__.py          # Pulumi infrastructure definition
 │   ├── firestore.indexes.json  # Firestore composite indexes
-│   ├── requirements.txt
+│   ├── pyproject.toml       # Infrastructure dependencies
+│   ├── uv.lock              # Locked dependency versions
 │   ├── README.md            # Infrastructure documentation
 │   ├── Pulumi.yaml
 │   ├── Pulumi.dev.yaml
@@ -613,9 +729,9 @@ personal-diary/
 │   └── settings.json
 ├── .env.example
 ├── .gitignore
-├── .mcp.json                # MCP server configuration
 ├── Dockerfile
-├── requirements.txt
+├── pyproject.toml           # Project dependencies and configuration
+├── uv.lock                  # Locked dependency versions
 └── README.md
 ```
 

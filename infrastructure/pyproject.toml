@@ -1,0 +1,10 @@
+[project]
+name = "personal-diary-infrastructure"
+version = "1.0.0"
+description = "Pulumi infrastructure for Personal Diary REST API"
+requires-python = ">=3.11"
+
+dependencies = [
+    "pulumi>=3.0.0,<4.0.0",
+    "pulumi-gcp>=9.0.0,<10.0.0",
+]

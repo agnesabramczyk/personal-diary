@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     gcp_project_id: str
     gcp_region: str = "australia-southeast1"
     storage_bucket: str
+    firestore_database: str = "(default)"
 
     # Authentication (optional for Cloud Run with Workload Identity)
     google_application_credentials: Optional[str] = None

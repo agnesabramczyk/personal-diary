@@ -1,14 +1,21 @@
-version: '3.8'
-
 services:
   app:
     build: .
+    container_name: personal-diary-dev
     ports:
       - "8080:8080"
-    env_file:
-      - .env
-    volumes:
-      # Mount Application Default Credentials
-      - ~/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro
     environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json
+      ENVIRONMENT: development
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+      GCP_REGION: ${GCP_REGION:-australia-southeast1}
+
+      # App config (keep if your code uses them)
+      STORAGE_BUCKET: ${STORAGE_BUCKET}
+      FIRESTORE_DATABASE: ${FIRESTORE_DATABASE}
+      API_KEYS: ${API_KEYS}
+
+    volumes:
+      # Mount gcloud creds read-only, in the non-root user's home
+      - ${HOME}/.config/gcloud:/home/appuser/.config/gcloud:ro

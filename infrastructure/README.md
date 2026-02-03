@@ -88,11 +88,12 @@ The infrastructure provisions a complete serverless application stack:
 # Install Pulumi CLI
 curl -fsSL https://get.pulumi.com | sh
 
-# Install Google Cloud SDK (if not already installed)
+# Install Google Cloud SDK
 brew install google-cloud-sdk
 
-# Install Docker
-brew install docker
+# Install Colima (lightweight container runtime for macOS)
+brew install colima docker docker-compose docker-buildx
+colima start
 ```
 
 ### GCP Authentication
@@ -111,48 +112,195 @@ gcloud config set project YOUR_PROJECT_ID
 ```bash
 cd infrastructure
 
-# Using uv (recommended - faster)
-uv pip install -r requirements.txt
+# Install dependencies (uv automatically creates .venv and installs locked versions)
+uv sync
 
-# Or using pip
-pip install -r requirements.txt
+# Activate the environment to use the installed packages
+source .venv/bin/activate
+```
+
+The infrastructure uses `pyproject.toml` and `uv.lock` for reproducible dependency management. Running `uv sync`:
+1. Creates a `.venv` directory (if it doesn't exist)
+2. Installs exact versions from `uv.lock` (Pulumi and dependencies)
+3. You then activate the environment to use those packages
+
+## Configuration Philosophy
+
+Configuration is split between static values (Pulumi code) and required stack settings:
+
+**Static values** (in `__main__.py`):
+- Application name, image name
+- Resource limits (CPU, memory)
+- Photo retention policy
+- Signed URL expiration
+
+**Required stack configuration** (set via `pulumi config set` or in `Pulumi.dev.yaml`):
+- GCP project and region
+- Environment name (development/production)
+- Log level (DEBUG/INFO/WARNING/ERROR)
+- CORS origins
+- Rate limit per minute
+- Docker image tag
+  - YAML default: `latest` (used by `make bootstrap` for first deployment)
+  - Makefile override: Git commit hash (used by `make deploy` for traceability)
+  - Manual operations: Must be explicitly set via `--config image_tag=...`
+
+## Makefile Targets
+
+The project includes a Makefile for both local development and cloud deployment:
+
+**Local Development** (Docker):
+```bash
+make dev-up          # Start application in Docker (http://localhost:8080)
+make dev-down        # Stop application
+make dev-logs        # View application logs
+make dev-shell       # Open shell in app container
+make dev-rebuild     # Rebuild image and restart
+```
+
+**Cloud Infrastructure**:
+```bash
+make bootstrap       # First-time setup: create registry, build image, deploy
+make build-push      # Build and push Docker image to Artifact Registry
+make deploy          # Regular deployment: build, push, update infrastructure
+make preview         # Preview infrastructure changes
+make destroy         # Destroy all infrastructure (requires confirmation)
+```
+
+**Quality**:
+```bash
+make lint            # Run linting checks
+make test            # Run tests
+```
+
+## Local Development
+
+### Setup
+
+```bash
+# Copy the environment template to create your local configuration
+cp .env.example .env
+
+# Edit .env with your GCP credentials and settings
+# Required: GCP_PROJECT_ID, STORAGE_BUCKET, FIRESTORE_DATABASE, API_KEYS
+```
+
+### Run Application Locally
+
+```bash
+# Start the application in Docker
+make dev-up
+
+# View logs
+make dev-logs
+
+# Open shell for debugging
+make dev-shell
+
+# Rebuild after code changes
+make dev-rebuild
+
+# Stop the application
+make dev-down
+```
+
+The application will be available at `http://localhost:8080` and configured with:
+- `ENVIRONMENT=development` (DEBUG logging)
+- Hot reload enabled (if FastAPI is configured with `--reload`)
+- GCP credentials mounted from `~/.config/gcloud/` (Application Default Credentials)
+- Local CORS origins: `http://localhost:3000,http://localhost:8080`
+
+### Local Testing Against GCP
+
+The docker-compose configuration automatically uses your local GCP credentials:
+
+```bash
+# Ensure you're authenticated with GCP
+gcloud auth application-default login
+
+# Start the app (it will use your credentials)
+make dev-up
+
+# Test against real GCP services
+curl -X POST http://localhost:8080/api/entries \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-test-api-key-1" \
+  -d '{"title": "Test", "content": "Hello"}'
 ```
 
 ## Deployment Guide
 
-### Step 1: Configure Pulumi Stack
+### Initial Setup
 
 ```bash
 cd infrastructure
 
-# Initialise Pulumi stack (if not already done)
-pulumi login
+# Log in to local Pulumi backend (stores state in ~/.pulumi)
+pulumi login file://~
 
-# Set stack configuration
+# Initialise stack
+pulumi stack init dev
+
+# Set stack configuration (all values required)
 pulumi config set gcp:project YOUR_PROJECT_ID
 pulumi config set gcp:region australia-southeast1
+pulumi config set environment development
+pulumi config set log_level DEBUG
+pulumi config set cors_origins "http://localhost:3000"
+pulumi config set rate_limit_per_minute "100"
+pulumi config set image_tag latest
 ```
 
-### Step 2: Deploy Infrastructure
+**About Pulumi backends:**
+
+Local filesystem (used above) stores state in `~/.pulumi` on your machine. Simple and works offline, but you're responsible for backing up the state directory.
+
+**Alternatives:**
+- **Pulumi Cloud**: `pulumi login` - Managed service with automatic backups (free tier: 200 resources)
+- **Cloud Storage**: `pulumi login gs://bucket-name` - Store state in Google Cloud Storage (or S3, Azure Blob, etc.)
+
+### First-Time Deployment
+
+Cloud Run requires a container image to deploy, creating a dependency order:
+1. Artifact Registry must exist before you can push images
+2. An image must exist before Cloud Run can deploy
+
+The `make bootstrap` target handles this automatically:
 
 ```bash
-# Preview changes
-pulumi preview
+cd infrastructure
 
-# Deploy infrastructure
-pulumi up
+# Create registry, build image, and deploy everything
+make bootstrap
 ```
 
-This provisions all resources including:
-- Firestore database with composite indexes
-- Cloud Storage bucket for photos
-- Artifact Registry repository for Docker images
-- Secret Manager secret for API keys
-- Cloud Run service (requires image to be pushed first)
-- Service account with appropriate IAM roles
-- Service account key for local development
+This runs in the correct order:
+1. Creates Artifact Registry (so we have somewhere to push)
+2. Builds and pushes Docker image (so Cloud Run has something to deploy)
+3. Deploys remaining infrastructure (Firestore, Storage, Secret Manager, Cloud Run)
 
-### Step 3: Get Infrastructure Outputs
+### Subsequent Deployments
+
+For updates to the running service:
+
+```bash
+# Build, push, and update infrastructure with new image tag
+make deploy
+
+# Or manually:
+make build-push
+pulumi up --config image_tag=$(git rev-parse --short HEAD)
+```
+
+### Preview Changes
+
+Before deploying:
+
+```bash
+make preview
+```
+
+### Get Infrastructure Outputs
 
 ```bash
 # View all outputs
@@ -163,42 +311,18 @@ export PROJECT_ID=$(pulumi stack output project_id)
 export REGION=$(pulumi stack output region)
 export BUCKET_NAME=$(pulumi stack output bucket_name)
 export SERVICE_ACCOUNT_EMAIL=$(pulumi stack output service_account_email)
+export CLOUD_RUN_URL=$(pulumi stack output cloud_run_service_url)
 ```
 
 ## Application Deployment
 
 ### Initial Setup
 
-After provisioning infrastructure, you need to:
-1. Build and push a Docker image to Artifact Registry
-2. Set API keys in Secret Manager
-3. Pulumi will automatically deploy the image to Cloud Run
+After provisioning infrastructure with `make bootstrap`, you need to:
+1. Update API keys in Secret Manager
+2. The Docker image is already built and deployed to Cloud Run
 
-### Step 1: Configure Docker Authentication
-
-```bash
-# Get the Artifact Registry URL
-export AR_URL=$(pulumi stack output artifact_registry_url)
-export REGION=$(pulumi stack output region)
-
-# Configure Docker to authenticate with Artifact Registry
-gcloud auth configure-docker ${REGION}-docker.pkg.dev
-```
-
-### Step 2: Build and Push Container Image
-
-```bash
-# Navigate to project root
-cd ..
-
-# Build Docker image
-docker build -t ${AR_URL}/personal-diary:latest .
-
-# Push to Artifact Registry
-docker push ${AR_URL}/personal-diary:latest
-```
-
-### Step 3: Update API Keys in Secret Manager
+### Update API Keys in Secret Manager
 
 ```bash
 # Generate secure API keys
@@ -212,17 +336,23 @@ echo -n "your-api-key-1,your-api-key-2,your-api-key-3" | \
   gcloud secrets versions add ${SECRET_ID} --data-file=-
 ```
 
-### Step 4: Deploy to Cloud Run
+### Deploy Updated Service
+
+To deploy a new version of the application:
 
 ```bash
-# Return to infrastructure directory
-cd infrastructure
+# Build, push image, and update Cloud Run
+make deploy
 
-# Deploy updated configuration
-pulumi up
+# Or manually:
+cd ../..  # Back to project root
+docker build -t $(cd infrastructure && pulumi stack output artifact_registry_url)/personal-diary:$(git rev-parse --short HEAD) .
+docker push $(cd infrastructure && pulumi stack output artifact_registry_url)/personal-diary:$(git rev-parse --short HEAD)
+cd infrastructure
+pulumi up --config image_tag=$(git rev-parse --short HEAD)
 ```
 
-The Cloud Run service will automatically use the latest image from Artifact Registry and pull API keys from Secret Manager.
+The Cloud Run service automatically uses the latest image from Artifact Registry.
 
 ## Verify Infrastructure
 
@@ -256,10 +386,21 @@ cd infrastructure
 # Edit __main__.py or firestore.indexes.json as needed
 
 # Preview changes
-pulumi preview
+make preview
 
 # Apply changes
 pulumi up
+```
+
+To update the deployed application with a new image:
+
+```bash
+# Build, push image, and update infrastructure with new tag
+make deploy
+
+# Or step by step:
+make build-push
+pulumi up --config image_tag=$(git rev-parse --short HEAD)
 ```
 
 ## Rolling Back Infrastructure Changes
@@ -296,7 +437,6 @@ After successful deployment, the following values are exported:
 | `cloud_run_service_name` | Cloud Run service name |
 | `cloud_run_service_url` | Live API endpoint URL |
 | `service_account_email` | Service account email |
-| `service_account_key` | Service account key (base64 encoded, secret) |
 | `firestore_database_name` | Firestore database name |
 | `firestore_indexes_count` | Number of composite indexes created |
 | `setup_instructions` | Complete setup instructions for next steps |
@@ -315,10 +455,8 @@ pulumi stack output <output_name>
 
 ### 2. Service Account
 - The service account has minimal required permissions (Firestore + Storage only)
-- For Cloud Run production deployment, use Workload Identity (no keys needed)
+- For Cloud Run production deployment, uses Workload Identity (no keys needed)
 - For local development, use Application Default Credentials: `gcloud auth application-default login`
-- Service account keys are available via Pulumi output but not recommended for regular use
-- Never commit service account keys to version control
 
 ### 3. Data Security
 - Storage bucket enforces private access
@@ -365,7 +503,7 @@ Set up monitoring in Google Cloud Console:
 
 ### Authentication Issues
 
-**Recommended approach** - Use Application Default Credentials:
+Use Application Default Credentials:
 ```bash
 # Authenticate with your user account
 gcloud auth application-default login
@@ -377,19 +515,6 @@ gcloud auth application-default print-access-token
 python -c "from google.cloud import firestore; client = firestore.Client(); print('Success')"
 ```
 
-**Alternative** - Service account key (if needed):
-```bash
-# Export service account key
-pulumi stack output service_account_key --show-secrets | base64 -d > ../gcp-key.json
-
-# Verify the key is valid JSON
-cat ../gcp-key.json | python -m json.tool
-
-# Test authentication
-export GOOGLE_APPLICATION_CREDENTIALS=../gcp-key.json
-gcloud auth activate-service-account --key-file=../gcp-key.json
-```
-
 ### Firestore Permission Issues
 
 ```bash
@@ -399,6 +524,39 @@ gcloud projects get-iam-policy $(pulumi stack output project_id) \
   --filter="bindings.members:$(pulumi stack output service_account_email)"
 ```
 
+## State Management
+
+Pulumi state is stored in `~/.pulumi` and contains critical information about your infrastructure (resource IDs, configuration, dependencies). Without this state, you cannot update or destroy your infrastructure through Pulumi.
+
+**Backup options:**
+
+**1. Time Machine (recommended for macOS)**
+- Ensure Time Machine is enabled - it automatically backs up `~/.pulumi`
+- Restore from Time Machine if needed
+
+**2. Export state to version control**
+```bash
+# Export current state
+cd infrastructure
+pulumi stack export --file stack-state.json
+
+# Commit to git (ensure repo is private!)
+git add stack-state.json
+git commit -m "Backup Pulumi state"
+
+# Restore from file
+pulumi stack import --file stack-state.json
+```
+
+**3. Backup to Google Cloud Storage**
+```bash
+# One-time backup
+pulumi stack export | gsutil cp - gs://your-backup-bucket/pulumi-state-$(date +%Y%m%d).json
+
+# Restore from GCS
+gsutil cat gs://your-backup-bucket/pulumi-state-YYYYMMDD.json | pulumi stack import
+```
+
 ## Clean Up
 
 To destroy all infrastructure:
@@ -406,10 +564,10 @@ To destroy all infrastructure:
 ```bash
 cd infrastructure
 
-# Preview what will be destroyed
-pulumi destroy --preview
+# Destroy infrastructure (requires confirmation)
+make destroy
 
-# Destroy infrastructure
+# Or manually:
 pulumi destroy
 
 # Remove Pulumi stack
@@ -417,6 +575,37 @@ pulumi stack rm dev
 ```
 
 **Warning**: This will permanently delete all data including Firestore documents and storage bucket photos!
+
+**Protected resources**: The Firestore database and Secret Manager secret have Pulumi protection enabled. To force deletion, use `pulumi destroy --target` or `-f` flag.
+
+## Infrastructure Improvements
+
+### Resource Protection
+
+The infrastructure includes built-in protections against accidental deletion:
+
+- **Firestore database**: Protected with `protect=True` in Pulumi and `deletion_protection=True` in non-development environments
+- **Secret Manager secret**: Protected with `protect=True` in Pulumi
+- **Storage bucket**: `force_destroy=True` only in development environment
+
+To delete protected resources, use `pulumi destroy -f`.
+
+### Resource Labels
+
+All resources are tagged with labels for organisation:
+- `app: personal-diary`
+- `environment: development|production`
+- `managed-by: pulumi`
+
+These appear in GCP Console for easy filtering and cost tracking.
+
+### Artifact Registry Cleanup
+
+The Artifact Registry automatically maintains only the 10 most recent image versions, preventing storage bloat from repeated deployments.
+
+### Configuration Simplification
+
+Static values (like memory limits, timeouts) are constants in the code. Environment-specific values (like log level, rate limits) go in stack configuration files. Deployment-specific values (like image tag) are passed at deploy time.
 
 ## Development Notes
 
@@ -427,16 +616,9 @@ pulumi stack rm dev
 
 ### Local Development Authentication
 
-**Recommended**: Use Application Default Credentials (no key files needed):
+Use Application Default Credentials (no key files needed):
 ```bash
 gcloud auth application-default login
-```
-
-**Alternative**: Export service account key (less secure, not recommended):
-```bash
-pulumi stack output service_account_key --show-secrets > ../gcp-key.json.b64
-base64 -d ../gcp-key.json.b64 > ../gcp-key.json
-rm ../gcp-key.json.b64
 ```
 
 ### Environment Variables
@@ -444,22 +626,35 @@ The following environment variables are configured in Cloud Run:
 - `GCP_PROJECT_ID` - Project ID
 - `GCP_REGION` - Deployment region
 - `STORAGE_BUCKET` - Photos bucket name
-- `API_KEYS` - From Secret Manager
-- `RATE_LIMIT_PER_MINUTE` - 100 requests
-- `SIGNED_URL_EXPIRATION` - 3600 seconds
-- `ENVIRONMENT` - production
-- `LOG_LEVEL` - INFO
+- `FIRESTORE_DATABASE` - Firestore database name
+- `ENVIRONMENT` - Environment (development/production)
+- `LOG_LEVEL` - Log level (DEBUG/INFO/WARNING/ERROR)
+- `RATE_LIMIT_PER_MINUTE` - API rate limit (from required config)
+- `SIGNED_URL_EXPIRATION` - Signed URL expiration in seconds (static value: 3600)
+- `CORS_ORIGINS` - CORS allowed origins (from config)
+- `API_KEYS` - From Secret Manager (set via gcloud secrets versions add)
 
 ## File Structure
 
 ```
 infrastructure/
 ├── __main__.py              # Main Pulumi program
-├── requirements.txt         # Python dependencies
-├── README.md               # This file
-├── Pulumi.yaml             # Pulumi project config
-├── Pulumi.dev.yaml         # Dev stack config
-└── .gitignore              # Git ignore rules
+├── pyproject.toml           # Python project metadata and dependencies
+├── uv.lock                  # Locked dependency versions
+├── firestore.indexes.json   # Firestore composite index definitions
+├── README.md                # This file
+├── Pulumi.yaml              # Pulumi project config
+├── Pulumi.dev.yaml          # Development stack configuration
+└── .gitignore               # Git ignore rules
+
+../
+├── Makefile                 # Deployment and local dev targets
+├── docker-compose.yml       # Local development environment
+├── .env.example             # Environment variables template (commit to git)
+├── .env                     # Local environment values (in .gitignore)
+├── Dockerfile               # Container image definition
+├── .gitignore               # Git ignore rules
+└── ...
 ```
 
 ## Additional Resources

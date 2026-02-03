@@ -45,7 +45,7 @@ build-push:
 	@IMAGE_TAG=$$(git rev-parse --short HEAD) && \
 	IMAGE_URL=$$(cd $(INFRA_DIR) && pulumi stack output artifact_registry_url)/$(IMAGE_NAME):$$IMAGE_TAG && \
 	echo "Building $$IMAGE_URL..." && \
-	docker build -t "$$IMAGE_URL" . && \
+	docker build --platform linux/amd64 -t "$$IMAGE_URL" . && \
 	docker push "$$IMAGE_URL"
 
 # Preview changes without applying

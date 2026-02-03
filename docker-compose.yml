@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      # Mount Application Default Credentials
+      - ~/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json

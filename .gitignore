@@ -1,18 +1,57 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
 .venv/
+venv/
+ENV/
+env/
 
-temp/
-data/
+# uv
+.python-version
 
+# Environment & Credentials
 .env
+.env.local
 gcp-key.json
+*.json.key
+*-key.json
 
+# Testing & Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary Files
 *.log
 *.tmp
-*.csv
+temp/
+tmp/
 
+# Project-specific
+data/
+docs/
+
+# Claude Code
 .claude/
 .clinerules/
 .clineignore
-.vscode/
 
-docs/
+# Misc
+*.csv

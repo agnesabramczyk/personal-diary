@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "dev-tools": {
+      "type": "stdio",
+      "command": "/Users/Agnes/.local/bin/mcp-devtools",
+      "args": [],
+      "env": {
+        "ENABLE_ADDITIONAL_TOOLS": "security,sequential_thinking,code_skim,code_rename",
+        "DISABLED_TOOLS": ""
+      }
+    }
+  }
+}
